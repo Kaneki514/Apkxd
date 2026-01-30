@@ -16,7 +16,7 @@ jobs:
         sudo apt install -y python3-pip python3-setuptools python3-dev build-essential \
           libssl-dev libffi-dev libsqlite3-dev zlib1g-dev libjpeg-dev libfreetype6-dev \
           libpng-dev libblas-dev liblapack-dev git unzip openjdk-11-jdk
-        pip install buildozer
+        pip install buildozer cython
 
     - name: Build APK
       run: |
