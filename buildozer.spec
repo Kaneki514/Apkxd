@@ -1,4 +1,9 @@
 [app]
+android.api = 33
+android.minapi = 21
+android.sdk = 33
+android.ndk = 23b
+android.accept_sdk_license = True
 
 # (str) Title of your application
 title = CruzRaya
