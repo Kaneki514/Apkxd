@@ -17,6 +17,7 @@ jobs:
           libssl-dev libffi-dev libsqlite3-dev zlib1g-dev libjpeg-dev libfreetype6-dev \
           libpng-dev libblas-dev liblapack-dev git unzip openjdk-11-jdk
         pip install buildozer cython
+        yes | sdkmanager --licenses
 
     - name: Build APK
       run: |
