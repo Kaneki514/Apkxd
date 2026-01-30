@@ -1,46 +1,258 @@
-name: Build APK
+name: Build APK with Buildozer
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:  # Permite ejecución manual
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04  # Usar versión LTS estable
+    
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      ANDROID_HOME: /home/runner/android-sdk
+      ANDROID_SDK_ROOT: /home/runner/android-sdk
+      NDK_VERSION: r25b
+      SDK_VERSION: 9477386
+      JAVA_HOME: /usr/lib/jvm/java-11-openjdk-amd64
+    
     steps:
-    - uses: actions/checkout@v3
-
-    - name: Install dependencies
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 1
+        
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+        
+    - name: Install system dependencies
       run: |
-        sudo apt update
-        sudo apt install -y python3-pip python3-setuptools python3-dev build-essential \
-          libssl-dev libffi-dev libsqlite3-dev zlib1g-dev libjpeg-dev libfreetype6-dev \
-          libpng-dev libblas-dev liblapack-dev git unzip openjdk-11-jdk wget
-        pip install buildozer cython
-
-        # Descargar Android SDK command-line tools
-        wget https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O cmdline-tools.zip
-        mkdir -p $HOME/android-sdk/cmdline-tools
-        unzip cmdline-tools.zip -d $HOME/android-sdk/cmdline-tools
-        mv $HOME/android-sdk/cmdline-tools/cmdline-tools $HOME/android-sdk/cmdline-tools/latest
-
-        export ANDROID_HOME=$HOME/android-sdk
-        export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH
-
-        # Aceptar licencias automáticamente
-        yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses
-
-        # Instalar plataformas y build-tools estables
-        $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-33" "build-tools;33.0.2"
-
-    - name: Build APK
+        sudo apt-get update
+        sudo apt-get install -y \
+          python3-pip \
+          python3-dev \
+          python3-setuptools \
+          build-essential \
+          git \
+          zip \
+          unzip \
+          curl \
+          openjdk-11-jdk \
+          autoconf \
+          automake \
+          libtool \
+          pkg-config \
+          zlib1g-dev \
+          libncurses5-dev \
+          libncursesw5-dev \
+          libtinfo5 \
+          cmake \
+          libffi-dev \
+          libssl-dev \
+          libltdl-dev \
+          libxml2-dev \
+          libxslt1-dev \
+          libjpeg-dev \
+          libpng-dev \
+          libfreetype6-dev \
+          libblas-dev \
+          liblapack-dev \
+          libatlas-base-dev \
+          gfortran \
+          python3-venv \
+          libsdl2-dev \
+          libsdl2-image-dev \
+          libsdl2-mixer-dev \
+          libsdl2-ttf-dev \
+          portaudio19-dev \
+          swig
+          
+    - name: Install Python dependencies
       run: |
-        export ANDROID_HOME=$HOME/android-sdk
-        export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH
-        buildozer android debug
+        python -m pip install --upgrade pip
+        pip install wheel
+        pip install buildozer==1.5.0
+        pip install cython==0.29.33
+        pip install virtualenv
+        
+    - name: Setup Android SDK
+      run: |
+        mkdir -p $ANDROID_HOME
+        cd $ANDROID_HOME
+        
+        # Download Android Command Line Tools
+        wget -q https://dl.google.com/android/repository/commandlinetools-linux-${SDK_VERSION}_latest.zip
+        unzip -q commandlinetools-linux-${SDK_VERSION}_latest.zip
+        rm commandlinetools-linux-${SDK_VERSION}_latest.zip
+        
+        # Create necessary directories
+        mkdir -p cmdline-tools/latest
+        mv cmdline-tools/* cmdline-tools/latest/
+        
+        # Set environment variables
+        echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
+        echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> $GITHUB_ENV
+        echo "PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH" >> $GITHUB_ENV
+        
+        # Accept licenses
+        yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+        
+        # Install required SDK components
+        $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
+          "platform-tools" \
+          "platforms;android-33" \
+          "platforms;android-31" \
+          "build-tools;33.0.2" \
+          "build-tools;31.0.0" \
+          "ndk;$NDK_VERSION" \
+          "cmake;3.22.1"
+          
+    - name: Setup Android NDK
+      run: |
+        echo "NDK_VERSION=$NDK_VERSION" >> $GITHUB_ENV
+        echo "PATH=$ANDROID_HOME/ndk/$NDK_VERSION:$PATH" >> $GITHUB_ENV
+        
+    - name: Configure Buildozer
+      run: |
+        # Initialize buildozer if spec doesn't exist
+        if [ ! -f buildozer.spec ]; then
+          buildozer init
+        fi
+        
+        # Create .buildozer directory
+        mkdir -p .buildozer
+        
+        # Set buildozer to use global SDK/NDK
+        buildozer android update > /dev/null 2>&1 || true
+        
+    - name: Create custom buildozer config
+      run: |
+        # Backup original spec if exists
+        if [ -f buildozer.spec ]; then
+          cp buildozer.spec buildozer.spec.backup
+        fi
+        
+        # Create optimized buildozer.spec
+        cat > buildozer.spec << 'EOF'
+[app]
+title = CruzRaya
+package.name = cruzraya
+package.domain = org.cruzraya
+source.dir = .
+source.include_exts = py,png,jpg,jpeg,ttf,otf,wav,mp3,ogg,json,txt
+version = 1.0
+requirements = python3==3.9.6,kivy==2.1.0,pygame==2.1.2,android
+android.permissions = INTERNET
+android.api = 33
+android.minapi = 21
+android.sdk = 24
+android.ndk = 25b
+android.ndk_api = 21
+android.archs = arm64-v8a
+android.bootstrap = sdl2
+android.entrypoint = org.kivy.android.PythonActivity
+android.activity_class_name = org.kivy.android.PythonActivity
+android.private_storage = True
+android.allow_backup = True
+fullscreen = 1
+orientation = portrait
+android.logcat_filters = *:S python:D
+android.features = android.hardware.touchscreen
+android.gradle_dependencies = 'com.google.android.material:material:1.6.0','androidx.core:core-ktx:1.9.0'
+android.enable_androidx = True
+android.add_compile_options = "sourceCompatibility = 1.8", "targetCompatibility = 1.8"
+android.accept_sdk_license = True
+android.skip_update = False
 
-    - name: Upload APK
+[buildozer]
+log_level = 2
+warn_on_root = 1
+build_dir = ./.buildozer
+bin_dir = ./bin
+EOF
+        
+    - name: Clean previous builds
+      run: |
+        buildozer android clean 2>/dev/null || true
+        rm -rf .buildozer/android/platform/build-* 2>/dev/null || true
+        
+    - name: Build APK (with retry)
+      continue-on-error: false
+      timeout-minutes: 45
+      run: |
+        set -e
+        
+        # First try with verbose logging
+        echo "Starting first build attempt..."
+        if buildozer -v android debug 2>&1 | tee build.log; then
+          echo "Build successful!"
+          exit 0
+        fi
+        
+        echo "First attempt failed, cleaning and retrying..."
+        
+        # Clean and retry
+        buildozer android clean
+        rm -rf .buildozer/android/platform/build-*
+        
+        # Second attempt with less verbose
+        echo "Starting second build attempt..."
+        if buildozer android debug; then
+          echo "Build successful on second attempt!"
+          exit 0
+        else
+          echo "Build failed after retry"
+          exit 1
+        fi
+        
+    - name: Check for APK file
+      run: |
+        if ls bin/*.apk 1> /dev/null 2>&1; then
+          echo "APK found:"
+          ls -la bin/*.apk
+          echo "APK_SIZE=$(ls -l bin/*.apk | awk '{print $5}')" >> $GITHUB_ENV
+        else
+          echo "No APK found!"
+          exit 1
+        fi
+        
+    - name: Upload APK artifact
       uses: actions/upload-artifact@v4
       with:
-        name: CruzRayaAPK
+        name: CruzRaya-APK
         path: bin/*.apk
+        retention-days: 7
+        
+    - name: Upload build logs
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: Build-Logs
+        path: |
+          .buildozer/*.log
+          build.log
+        retention-days: 3
+        
+    - name: Generate summary
+      if: always()
+      run: |
+        echo "# Build Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        if [ -f bin/*.apk ]; then
+          APK_FILE=$(ls bin/*.apk)
+          APK_SIZE=$(ls -lh $APK_FILE | awk '{print $5}')
+          echo "✅ **Build Successful!**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**APK File:** $APK_FILE" >> $GITHUB_STEP_SUMMARY
+          echo "**APK Size:** $APK_SIZE" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "❌ **Build Failed**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Check the build logs for details." >> $GITHUB_STEP_SUMMARY
+        fi
