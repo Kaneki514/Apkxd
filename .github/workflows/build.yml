@@ -1,65 +1,219 @@
-name: Build APK with p4a
+name: Build Android APK with Buildozer
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, master, develop ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:  # Permite ejecución manual
 
+env:
+  BUILD_DIR: ".buildozer"
+  CACHE_KEY: "buildozer-${{ runner.os }}-${{ hashFiles('buildozer.spec', 'requirements.txt') }}"
+  PYTHON_VERSION: "3.9"
+  
 jobs:
-  build:
-    runs-on: ubuntu-latest
+  build-apk:
+    name: Build Android APK
+    runs-on: ubuntu-22.04  # Ubuntu 22.04 LTS recomendado
+    
+    strategy:
+      matrix:
+        python-version: ["3.9"]
+        target: [debug, release]  # Construye ambos tipos
+        
     steps:
-    - uses: actions/checkout@v3
-
-    - name: Install dependencies
-      run: |
-        sudo apt update
-        sudo apt install -y python3 python3-pip python3-setuptools python3-dev \
-          build-essential git unzip openjdk-11-jdk wget
-        pip install cython wheel setuptools
-
-        # Descargar Android SDK command-line tools
-        wget https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O cmdline-tools.zip
-        mkdir -p $HOME/android-sdk/cmdline-tools
-        unzip cmdline-tools.zip -d $HOME/android-sdk/cmdline-tools
-        mv $HOME/android-sdk/cmdline-tools/cmdline-tools $HOME/android-sdk/cmdline-tools/latest
-
-        export ANDROID_HOME=$HOME/android-sdk
-        export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH
-
-        # Aceptar licencias automáticamente
-        yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses
-
-        # Instalar plataformas y build-tools estables
-        $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-33" "build-tools;33.0.2"
-
-        # Descargar NDK r23b
-        wget https://dl.google.com/android/repository/android-ndk-r23b-linux.zip -O ndk.zip
-        unzip ndk.zip -d $HOME/
-        mv $HOME/android-ndk-r23b $HOME/android-ndk
-
-    - name: Build APK with python-for-android
-      run: |
-        export ANDROID_HOME=$HOME/android-sdk
-        export ANDROIDNDK=$HOME/android-ndk
-        export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH
-
-        git clone https://github.com/kivy/python-for-android
-        cd python-for-android
-
-        python3 -m pythonforandroid.toolchain apk \
-          --bootstrap=sdl2 \
-          --requirements=python3,pygame \
-          --private $GITHUB_WORKSPACE \
-          --package=org.test.cruzraya \
-          --name="CruzRaya" \
-          --version=0.1 \
-          --sdk-dir=$ANDROID_HOME \
-          --ndk-dir=$ANDROIDNDK \
-          --android-api=33 \
-          --arch=arm64-v8a
-
-    - name: Upload APK
-      uses: actions/upload-artifact@v4
+    - name: Checkout código
+      uses: actions/checkout@v3
       with:
-        name: CruzRayaAPK
-        path: python-for-android/dist/*.apk
+        fetch-depth: 0
+        
+    - name: Configurar Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+        cache: 'pip'
+        
+    - name: Configurar caché para Buildozer
+      uses: actions/cache@v3
+      id: cache-buildozer
+      with:
+        path: |
+          ${{ env.BUILD_DIR }}
+          ~/.buildozer
+          ~/.android
+          ~/.gradle
+        key: ${{ env.CACHE_KEY }}-${{ runner.os }}-${{ github.run_id }}
+        restore-keys: |
+          ${{ env.CACHE_KEY }}-${{ runner.os }}
+          
+    - name: Instalar dependencias del sistema
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          python3-pip python3-dev git zip unzip \
+          libncurses5-dev libffi-dev libssl-dev \
+          openjdk-11-jdk autoconf libtool pkg-config \
+          zlib1g-dev libbz2-dev libreadline-dev \
+          libsqlite3-dev wget curl llvm \
+          libncursesw5-dev xz-utils tk-dev \
+          libxml2-dev libxmlsec1-dev liblzma-dev \
+          gcc make build-essential cython \
+          python3-setuptools \
+          libjpeg-dev libtiff5-dev libsdl2-dev \
+          libmtdev-dev libgstreamer1.0-dev \
+          libgstreamer-plugins-base1.0-dev \
+          libsmpeg0 libsmpeg0-dev \
+          libswscale-dev libavformat-dev libavcodec-dev \
+          libgl1-mesa-dev libgles2-mesa-dev \
+          libsdl2-image-dev libsdl2-mixer-dev libsdl2-ttf-dev
+          
+    - name: Configurar entorno Android
+      run: |
+        # Configurar variables de entorno para Android
+        echo "ANDROID_HOME=$HOME/.buildozer/android/platform/android-sdk" >> $GITHUB_ENV
+        echo "ANDROID_SDK_HOME=$HOME/.buildozer/android/platform/android-sdk" >> $GITHUB_ENV
+        echo "ANDROID_NDK_HOME=$HOME/.buildozer/android/platform/android-ndk" >> $GITHUB_ENV
+        echo "PATH=$HOME/.buildozer/android/platform/android-sdk/tools/bin:$PATH" >> $GITHUB_ENV
+        echo "PATH=$HOME/.buildozer/android/platform/android-sdk/platform-tools:$PATH" >> $GITHUB_ENV
+        
+    - name: Instalar Buildozer y dependencias Python
+      run: |
+        python -m pip install --upgrade pip setuptools wheel
+        pip install --upgrade buildozer cython
+        pip install --upgrade virtualenv
+        
+        # Instalar dependencias del proyecto si existe requirements.txt
+        if [ -f "requirements.txt" ]; then
+            pip install -r requirements.txt
+        fi
+        
+        # Instalar Kivy si no está en requirements.txt
+        pip install kivy
+        
+    - name: Verificar archivo buildozer.spec
+      id: check_spec
+      run: |
+        if [ ! -f "buildozer.spec" ]; then
+          echo "Generando archivo buildozer.spec inicial..."
+          buildozer init
+          echo "spec_generated=true" >> $GITHUB_OUTPUT
+        else
+          echo "Usando buildozer.spec existente"
+          echo "spec_generated=false" >> $GITHUB_OUTPUT
+        fi
+        
+    - name: Configurar buildozer.spec para CI
+      if: steps.check_spec.outputs.spec_generated == 'true'
+      run: |
+        # Configurar valores por defecto para CI
+        sed -i "s|# source.dir = .|source.dir = .|" buildozer.spec
+        sed -i "s|# version = 0.1|version = 1.0.0-${{ github.run_number }}|" buildozer.spec
+        sed -i "s|# package.name = myapp|package.name = ${{ github.event.repository.name }}|" buildozer.spec
+        sed -i "s|# package.domain = org.test|package.domain = org.github.${{ github.repository_owner }}|" buildozer.spec
+        sed -i "s|# requirements = python3,kivy|requirements = python3,kivy|" buildozer.spec
+        sed -i "s|# android.api = 31|android.api = 31|" buildozer.spec
+        sed -i "s|# android.minapi = 21|android.minapi = 21|" buildozer.spec
+        sed -i "s|# android.ndk = 25b|android.ndk = 25b|" buildozer.spec
+        
+    - name: Construir APK Debug
+      if: matrix.target == 'debug'
+      run: |
+        echo "Construyendo APK Debug..."
+        
+        # Configurar Buildozer para modo CI
+        export BUILDOZER_COMMAND="buildozer android debug"
+        
+        # Construir la APK
+        buildozer -v android debug
+        
+        # Verificar si se creó la APK
+        if ls bin/*debug*.apk 1> /dev/null 2>&1; then
+          echo "APK Debug creada exitosamente"
+          ls -la bin/
+        else
+          echo "Error: No se encontró APK Debug"
+          exit 1
+        fi
+        
+    - name: Construir APK Release (sin firmar)
+      if: matrix.target == 'release'
+      run: |
+        echo "Construyendo APK Release..."
+        
+        # Configurar Buildozer para release
+        export BUILDOZER_COMMAND="buildozer android release"
+        
+        # Construir la APK release
+        buildozer -v android release
+        
+        # Verificar si se creó la APK
+        if ls bin/*release*.apk 1> /dev/null 2>&1; then
+          echo "APK Release creada exitosamente"
+          ls -la bin/
+        else
+          echo "Error: No se encontró APK Release"
+          exit 1
+        fi
+        
+    - name: Subir APKs como artefactos
+      uses: actions/upload-artifact@v3
+      with:
+        name: android-apks
+        path: bin/*.apk
+        retention-days: 7
+        
+    - name: Crear Release en GitHub
+      if: startsWith(github.ref, 'refs/tags/v')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: bin/*.apk
+        draft: false
+        prerelease: false
+        generate_release_notes: true
+        
+    - name: Notificar éxito
+      if: success()
+      run: |
+        echo "✅ Build completado exitosamente"
+        echo "APKs disponibles en la pestaña 'Artifacts'"
+        
+    - name: Notificar fallo
+      if: failure()
+      run: |
+        echo "❌ Build falló"
+        echo "Revisar logs para más detalles"
+        
+  test-apk:
+    name: Test APK Básico
+    runs-on: ubuntu-22.04
+    needs: build-apk
+    if: github.event_name == 'pull_request'
+    
+    steps:
+    - name: Descargar artefactos
+      uses: actions/download-artifact@v3
+      with:
+        name: android-apks
+        
+    - name: Instalar herramientas de test
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y android-sdk-platform-tools-common
+        
+    - name: Verificar APK básica
+      run: |
+        echo "Verificando APKs descargadas..."
+        ls -la
+        
+        # Verificar que las APKs existen
+        for apk in *.apk; do
+          if [ -f "$apk" ]; then
+            echo "✅ APK encontrada: $apk"
+            echo "Tamaño: $(du -h "$apk" | cut -f1)"
+          else
+            echo "❌ No se encontraron APKs"
+            exit 1
+          fi
+        done
