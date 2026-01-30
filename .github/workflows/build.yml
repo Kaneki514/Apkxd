@@ -30,7 +30,7 @@ jobs:
         # Aceptar licencias automáticamente
         yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses
 
-        # Instalar plataformas y build-tools estables (evita el error de la 36.1)
+        # Instalar plataformas y build-tools estables
         $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-33" "build-tools;33.0.2"
 
     - name: Build APK
