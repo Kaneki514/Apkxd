@@ -22,8 +22,6 @@ jobs:
         wget https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -O cmdline-tools.zip
         mkdir -p $HOME/android-sdk/cmdline-tools
         unzip cmdline-tools.zip -d $HOME/android-sdk/cmdline-tools
-
-        # Mover carpeta a "latest" (Buildozer lo espera ahí)
         mv $HOME/android-sdk/cmdline-tools/cmdline-tools $HOME/android-sdk/cmdline-tools/latest
 
         export ANDROID_HOME=$HOME/android-sdk
@@ -32,8 +30,8 @@ jobs:
         # Aceptar licencias automáticamente
         yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses
 
-        # Instalar plataformas y build-tools necesarios
-        $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-31" "build-tools;31.0.0"
+        # Instalar plataformas y build-tools estables
+        $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-33" "build-tools;33.0.2"
 
     - name: Build APK
       run: |
